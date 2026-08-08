@@ -1,0 +1,24 @@
+{
+  "name": "cuts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.507",
+    "@remotion/renderer": "4.0.507",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "remotion": "4.0.507"
+  },
+  "scripts": {
+    "dev": "node --watch src/server/index.mjs",
+    "start": "node src/server/index.mjs",
+    "check": "node --check src/server/index.mjs && node --check src/server/storage.mjs && node --check src/server/render.mjs && node --check web/app.js",
+    "test": "node --test",
+    "smoke:render": "node scripts/render-smoke.mjs",
+    "audit:prod": "npm audit --omit=dev"
+  }
+}

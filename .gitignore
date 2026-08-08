@@ -1,0 +1,7 @@
+node_modules/
+runs/
+.cuts-data/
+.npm-cache/
+*.log
+.DS_Store
+Thumbs.db
