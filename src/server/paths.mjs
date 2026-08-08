@@ -21,3 +21,15 @@ export const submissionRoot = (runId, submissionId) =>
   path.join(runRoot(runId), 'submissions', safeSegment(submissionId, 'submission ID'));
 export const workspaceRoot = (runId, submissionId) =>
   path.join(submissionRoot(runId, submissionId), 'workspace');
+
+export const resolveWorkspacePath = (candidate) => {
+  const resolved = path.resolve(candidate);
+  const root = path.resolve(runsRoot);
+  if (!resolved.startsWith(`${root}${path.sep}`)) {
+    throw new Error('Workspace must be inside the CUTS runs directory.');
+  }
+  if (path.basename(resolved).toLowerCase() !== 'workspace') {
+    throw new Error('Expected a generated CUTS workspace directory.');
+  }
+  return resolved;
+};

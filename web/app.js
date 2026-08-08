@@ -13,6 +13,15 @@ const escapeHtml = (value = '') =>
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
 
+const safeExternalUrl = (value) => {
+  try {
+    const url = new URL(String(value));
+    return url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+};
+
 const toast = (message, bad = false) => {
   toastElement.textContent = message;
   toastElement.className = `toast show${bad ? ' bad' : ''}`;
@@ -246,6 +255,7 @@ const renderResults = (run) => {
     .map((submission) => ({submission, rating: ratingFor(run, submission.id)}))
     .filter((item) => item.rating)
     .sort((a, b) => b.rating.overall - a.rating.overall);
+  const failed = run.submissions.filter((submission) => submission.status === 'failed');
   app.innerHTML = `
     <section class="page-head"><div>${pageHeading(run)}</div><span class="pill judged">Revealed</span></section>
     <div class="section-head"><h2>The reveal</h2><span class="meta">Your ratings, your taste.</span></div>
@@ -261,10 +271,66 @@ const renderResults = (run) => {
             ${rating.notes ? `<p class="lede">${escapeHtml(rating.notes)}</p>` : ''}
             ${submission.manifest?.title ? `<h3>${escapeHtml(submission.manifest.title)}</h3>` : ''}
             ${submission.manifest?.description ? `<p class="manifest">${escapeHtml(submission.manifest.description)}</p>` : ''}
-            <div class="path">${escapeHtml(submission.workspacePath)}</div>
+            ${submission.manifest?.error ? `<div class="error">${escapeHtml(submission.manifest.error)}</div>` : ''}
+            <div class="actions artifact-actions">
+              <button class="button secondary small copy" data-path="${escapeHtml(submission.workspacePath)}">Copy workspace path</button>
+            </div>
+            <details class="details artifacts">
+              <summary>Sources, scores, and render log</summary>
+              <div class="artifact-block">
+                <h3>Detailed scores</h3>
+                <dl class="score-list">
+                  ${[
+                    ['Clip selection', rating.clipSelection],
+                    ['Flow and timing', rating.flow],
+                    ['Music and sound', rating.musicAndSound],
+                    ['Emotional impact', rating.emotionalImpact],
+                    ['Originality', rating.originality],
+                  ].filter(([, value]) => value).map(([label, value]) => `<div><dt>${label}</dt><dd>${value} / 10</dd></div>`).join('') || '<div class="meta">No detailed scores recorded.</div>'}
+                </dl>
+              </div>
+              <div class="artifact-block">
+                <h3>Sources</h3>
+                <ul class="source-list">
+                  ${(Array.isArray(submission.manifest?.sources) ? submission.manifest.sources : []).map((source) => {
+                    const href = safeExternalUrl(source?.url);
+                    const label = source?.url || source?.localFile || 'Unnamed source';
+                    return `<li>${href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>` : escapeHtml(label)}${source?.localFile ? `<span class="path">${escapeHtml(source.localFile)}</span>` : ''}</li>`;
+                  }).join('') || '<li class="meta">No sources listed.</li>'}
+                </ul>
+              </div>
+              <div class="artifact-block">
+                <h3>Workspace</h3>
+                <div class="path">${escapeHtml(submission.workspacePath)}</div>
+                ${submission.videoPath ? `<div class="path">${escapeHtml(submission.videoPath)}</div>` : ''}
+              </div>
+              <div class="artifact-block">
+                <h3>Render log</h3>
+                <pre class="render-log">${escapeHtml(submission.renderLog || 'No render log found.')}</pre>
+              </div>
+            </details>
           </div>
         </article>`).join('')}
-    </section>`;
+    </section>
+    ${failed.length ? `
+      <div class="section-head"><h2>Failed renders</h2><span class="meta">Preserved for inspection</span></div>
+      <section class="submission-list">
+        ${failed.map((submission) => `
+          <article class="submission-card">
+            <div>
+              <div class="actions"><h3>${escapeHtml(submission.modelLabel)}</h3><span class="pill failed">Failed</span></div>
+              <div class="error">${escapeHtml(submission.failureMessage || 'The render did not complete.')}</div>
+              <div class="path">${escapeHtml(submission.workspacePath)}</div>
+              <details class="details artifacts"><summary>Render log</summary><pre class="render-log">${escapeHtml(submission.renderLog || 'No render log found.')}</pre></details>
+            </div>
+            <button class="button secondary small copy" data-path="${escapeHtml(submission.workspacePath)}">Copy workspace path</button>
+          </article>`).join('')}
+      </section>` : ''}`;
+
+  document.querySelectorAll('.copy').forEach((button) => button.addEventListener('click', async () => {
+    await navigator.clipboard.writeText(button.dataset.path);
+    toast('Workspace path copied.');
+  }));
 };
 
 window.addEventListener('hashchange', route);

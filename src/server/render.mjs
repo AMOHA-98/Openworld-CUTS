@@ -42,24 +42,45 @@ const appendLog = (stream, message) => {
 const percent = (progress) =>
   Math.round(progress <= 1 ? progress * 100 : progress);
 
-const executeRender = async ({runId, submissionId, submission, entryPoint}) => {
-  const key = `${runId}:${submissionId}`;
-  const publicDir = path.join(submission.workspacePath, 'public');
-  const outputDir = path.join(submission.workspacePath, 'output');
+const finishLog = (stream) =>
+  new Promise((resolve, reject) => {
+    stream.once('error', reject);
+    stream.end(resolve);
+  });
+
+export const renderWorkspace = async ({workspacePath}) => {
+  const entryPoint = path.join(workspacePath, 'src', 'index.tsx');
+  const sourceDirectory = path.join(workspacePath, 'src');
+  const publicDir = path.join(workspacePath, 'public');
+  const outputDir = path.join(workspacePath, 'output');
   const outputLocation = path.join(outputDir, 'final.mp4');
   const renderLogPath = path.join(outputDir, 'render.log');
   const browserExecutable = resolveBrowserExecutable();
+  await stat(entryPoint);
+  if (await containsStarterMarker(sourceDirectory)) {
+    throw new Error(
+      'The workspace still contains CUTS_STARTER_NOT_EDITED. Replace the starter edit first.',
+    );
+  }
   await mkdir(outputDir, {recursive: true});
 
   const log = createWriteStream(renderLogPath, {flags: 'w'});
   appendLog(log, `Bundling ${entryPoint}`);
+  let lastBundlePercent = -1;
+  let lastRenderPercent = -1;
 
   try {
     const serveUrl = await bundle({
       entryPoint,
       publicDir,
       rootDir: projectRoot,
-      onProgress: (progress) => appendLog(log, `Bundle ${percent(progress)}%`),
+      onProgress: (progress) => {
+        const nextPercent = percent(progress);
+        if (nextPercent !== lastBundlePercent) {
+          appendLog(log, `Bundle ${nextPercent}%`);
+          lastBundlePercent = nextPercent;
+        }
+      },
     });
     appendLog(log, 'Selecting CutsEntry');
     const composition = await selectComposition({
@@ -78,27 +99,45 @@ const executeRender = async ({runId, submissionId, submission, entryPoint}) => {
       overwrite: true,
       inputProps: {},
       browserExecutable,
-      onProgress: ({progress}) => appendLog(log, `Render ${percent(progress)}%`),
+      onProgress: ({progress}) => {
+        const nextPercent = percent(progress);
+        if (nextPercent !== lastRenderPercent) {
+          appendLog(log, `Render ${nextPercent}%`);
+          lastRenderPercent = nextPercent;
+        }
+      },
     });
 
     const renderedFile = await stat(outputLocation);
     if (renderedFile.size === 0) throw new Error('Remotion produced an empty file.');
     appendLog(log, `Complete (${renderedFile.size} bytes)`);
+    await finishLog(log);
+    return {outputLocation, renderLogPath, bytes: renderedFile.size};
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appendLog(log, `FAILED: ${message}`);
+    await finishLog(log);
+    throw error;
+  }
+};
+
+const executeRender = async ({runId, submissionId, submission}) => {
+  const key = `${runId}:${submissionId}`;
+  try {
+    const result = await renderWorkspace({workspacePath: submission.workspacePath});
     await updateSubmission(runId, submissionId, {
       status: 'complete',
-      videoPath: outputLocation,
+      videoPath: result.outputLocation,
       completedAt: new Date().toISOString(),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    appendLog(log, `FAILED: ${message}`);
     await updateSubmission(runId, submissionId, {
       status: 'failed',
       failureMessage: message,
       completedAt: new Date().toISOString(),
     });
   } finally {
-    log.end();
     activeRenders.delete(key);
   }
 };
@@ -114,12 +153,9 @@ export const queueRender = async (runId, submissionId) => {
   const submission = run.submissions.find((item) => item.id === submissionId);
   if (!submission) throw new Error('Submission not found.');
 
-  const entryPoint = path.join(submission.workspacePath, 'src', 'index.tsx');
-  await stat(entryPoint);
+  await stat(path.join(submission.workspacePath, 'src', 'index.tsx'));
   if (await containsStarterMarker(path.join(submission.workspacePath, 'src'))) {
-    throw new Error(
-      'The workspace still contains CUTS_STARTER_NOT_EDITED. Let the model replace the starter edit first.',
-    );
+    throw new Error('The workspace still contains CUTS_STARTER_NOT_EDITED. Let the model replace the starter edit first.');
   }
 
   const renderLogPath = path.join(submission.workspacePath, 'output', 'render.log');
@@ -132,5 +168,5 @@ export const queueRender = async (runId, submissionId) => {
     renderLogPath,
   });
 
-  void executeRender({runId, submissionId, submission, entryPoint});
+  void executeRender({runId, submissionId, submission});
 };

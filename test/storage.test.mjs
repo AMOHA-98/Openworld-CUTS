@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdtemp, readFile, rm} from 'node:fs/promises';
+import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -27,12 +27,23 @@ test('creates isolated workspaces and keeps identities hidden while judging', as
       );
       assert.match(task, /Make a compelling/);
       assert.match(task, new RegExp(submission.modelLabel));
+      assert.match(task, /media:download/);
+      assert.match(task, /render:workspace/);
+      assert.match(task, new RegExp(submission.workspacePath.replaceAll('\\', '\\\\')));
     }
 
     for (const submission of run.submissions) {
+      const renderLogPath = path.join(submission.workspacePath, 'output', 'render.log');
+      await writeFile(renderLogPath, 'render complete\n', 'utf8');
+      await writeFile(
+        path.join(submission.workspacePath, 'output', 'submission.json'),
+        `${JSON.stringify({title: `${submission.modelLabel} cut`, sources: [{url: 'https://example.com/source'}]})}\n`,
+        'utf8',
+      );
       await storage.updateSubmission(run.id, submission.id, {
         status: 'complete',
         videoPath: path.join(submission.workspacePath, 'output', 'final.mp4'),
+        renderLogPath,
       });
     }
 
@@ -41,6 +52,8 @@ test('creates isolated workspaces and keeps identities hidden while judging', as
     assert.equal(blind.status, 'judging');
     assert.equal(blind.submissions.length, 2);
     assert.ok(blind.submissions.every((submission) => submission.modelLabel === undefined));
+    assert.ok(blind.submissions.every((submission) => submission.manifest === undefined));
+    assert.ok(blind.submissions.every((submission) => submission.renderLog === undefined));
 
     for (const submission of blind.submissions) {
       await storage.saveRating(run.id, {
@@ -55,6 +68,8 @@ test('creates isolated workspaces and keeps identities hidden while judging', as
       new Set(revealed.submissions.map((submission) => submission.modelLabel)),
       new Set(['GPT', 'Claude']),
     );
+    assert.ok(revealed.submissions.every((submission) => submission.manifest?.sources?.length === 1));
+    assert.ok(revealed.submissions.every((submission) => submission.renderLog === 'render complete\n'));
   } finally {
     await rm(temporaryRoot, {recursive: true, force: true});
     delete process.env.CUTS_RUNS_ROOT;

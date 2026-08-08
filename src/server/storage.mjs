@@ -1,8 +1,9 @@
 import {randomUUID} from 'node:crypto';
-import {cp, mkdir, readFile, readdir, rename, writeFile} from 'node:fs/promises';
+import {cp, mkdir, open, readFile, readdir, rename, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {
   ratingsFile,
+  projectRoot,
   runFile,
   runRoot,
   runsRoot,
@@ -48,7 +49,7 @@ export const writeJson = async (filePath, value) => {
   await rename(temporaryPath, filePath);
 };
 
-const taskMarkdown = (run, modelLabel) => `# CUTS task
+const taskMarkdown = (run, modelLabel, submissionWorkspace) => `# CUTS task
 
 You are creating one entry for CUTS. Your entry is identified privately as **${modelLabel}**, but the finished edit will be judged anonymously.
 
@@ -66,7 +67,31 @@ Make every creative decision yourself. ${
 
 Search for and download the audiovisual material you want. Put local media inside \`public/assets/\`. Build the edit in Remotion by replacing \`src/Edit.tsx\` and removing the \`CUTS_STARTER_NOT_EDITED\` marker.
 
-The registered composition must remain named \`CutsEntry\`. CUTS will render the composition after Ahmed marks this workspace ready.
+The registered composition must remain named \`CutsEntry\`. Preview or render as often as you need; CUTS will also render the composition after Ahmed marks this workspace ready.
+
+## Local helper commands
+
+Run these from PowerShell. They are intentionally narrow and do not install packages or invoke an LLM.
+
+Direct media file URL:
+
+\`\`\`powershell
+npm.cmd --prefix "${projectRoot}" run media:download -- "${submissionWorkspace}" "https://example.com/clip.mp4" "clip.mp4"
+\`\`\`
+
+For a YouTube or other supported page URL, CUTS can use an optional manually supplied \`tools/yt-dlp.exe\`:
+
+\`\`\`powershell
+npm.cmd --prefix "${projectRoot}" run media:acquire -- "${submissionWorkspace}" "https://example.com/watch-page"
+\`\`\`
+
+Render your current composition to \`output/final.mp4\`:
+
+\`\`\`powershell
+npm.cmd --prefix "${projectRoot}" run render:workspace -- "${submissionWorkspace}"
+\`\`\`
+
+Only download media files. Do not download or execute scripts, packages, browser extensions, or binaries. Record the original page or media URLs in \`output/submission.json\`.
 
 ## Output contract
 
@@ -161,7 +186,7 @@ export const createRun = async (input) => {
       );
       await writeFile(
         path.join(submission.workspacePath, 'CUTS_TASK.md'),
-        taskMarkdown(run, submission.modelLabel),
+        taskMarkdown(run, submission.modelLabel, submission.workspacePath),
         'utf8',
       );
     }),
@@ -221,8 +246,32 @@ export const listRuns = async () => {
   return records.filter(Boolean).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 };
 
-const readManifest = (submission) =>
-  readJson(path.join(submission.workspacePath, 'output', 'submission.json'), null);
+const readManifest = async (submission) => {
+  try {
+    return await readJson(path.join(submission.workspacePath, 'output', 'submission.json'), null);
+  } catch (error) {
+    return {error: `Could not read submission.json: ${error.message}`};
+  }
+};
+
+const readLogTail = async (filePath, maximumBytes = 100_000) => {
+  if (!filePath) return null;
+  let handle;
+  try {
+    const file = await stat(filePath);
+    const bytesToRead = Math.min(file.size, maximumBytes);
+    const buffer = Buffer.alloc(bytesToRead);
+    handle = await open(filePath, 'r');
+    await handle.read(buffer, 0, bytesToRead, file.size - bytesToRead);
+    const prefix = file.size > maximumBytes ? '[Earlier log output omitted]\n' : '';
+    return `${prefix}${buffer.toString('utf8')}`;
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    return `Could not read render log: ${error.message}`;
+  } finally {
+    await handle?.close();
+  }
+};
 
 export const getPublicRun = async (runId) => {
   const run = await getRun(runId);
@@ -231,24 +280,31 @@ export const getPublicRun = async (runId) => {
   const revealArtifacts = run.status === 'judged';
 
   const submissions = await Promise.all(
-    run.submissions.map(async (submission) => ({
-      id: submission.id,
-      runId: submission.runId,
-      anonymousLabel: submission.anonymousLabel,
-      status: submission.status,
-      workspacePath: revealIdentity ? submission.workspacePath : '',
-      videoPath: revealArtifacts ? submission.videoPath : undefined,
-      renderLogPath: revealArtifacts ? submission.renderLogPath : undefined,
-      startedAt: submission.startedAt,
-      completedAt: submission.completedAt,
-      failureMessage: revealIdentity ? submission.failureMessage : undefined,
-      modelLabel: revealIdentity ? submission.modelLabel : undefined,
-      videoUrl:
-        submission.status === 'complete'
-          ? `/media/${encodeURIComponent(run.id)}/${encodeURIComponent(submission.id)}/final.mp4`
-          : undefined,
-      manifest: revealArtifacts ? await readManifest(submission) : undefined,
-    })),
+    run.submissions.map(async (submission) => {
+      const manifest = revealArtifacts ? await readManifest(submission) : undefined;
+      const renderLog = revealArtifacts
+        ? await readLogTail(submission.renderLogPath)
+        : undefined;
+      return {
+        id: submission.id,
+        runId: submission.runId,
+        anonymousLabel: submission.anonymousLabel,
+        status: submission.status,
+        workspacePath: revealIdentity ? submission.workspacePath : '',
+        videoPath: revealArtifacts ? submission.videoPath : undefined,
+        renderLogPath: revealArtifacts ? submission.renderLogPath : undefined,
+        renderLog,
+        startedAt: submission.startedAt,
+        completedAt: submission.completedAt,
+        failureMessage: revealIdentity ? submission.failureMessage : undefined,
+        modelLabel: revealIdentity ? submission.modelLabel : undefined,
+        videoUrl:
+          submission.status === 'complete'
+            ? `/media/${encodeURIComponent(run.id)}/${encodeURIComponent(submission.id)}/final.mp4`
+            : undefined,
+        manifest,
+      };
+    }),
   );
 
   const orderedSubmissions =

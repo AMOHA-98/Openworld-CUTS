@@ -16,9 +16,12 @@
   "scripts": {
     "dev": "node --watch src/server/index.mjs",
     "start": "node src/server/index.mjs",
-    "check": "node --check src/server/index.mjs && node --check src/server/storage.mjs && node --check src/server/render.mjs && node --check web/app.js",
+    "check": "node --check src/server/index.mjs && node --check src/server/storage.mjs && node --check src/server/render.mjs && node --check src/server/media-security.mjs && node --check scripts/download-direct.mjs && node --check scripts/acquire-platform.mjs && node --check scripts/render-workspace.mjs && node --check web/app.js",
     "test": "node --test",
     "smoke:render": "node scripts/render-smoke.mjs",
+    "media:download": "node scripts/download-direct.mjs",
+    "media:acquire": "node scripts/acquire-platform.mjs",
+    "render:workspace": "node scripts/render-workspace.mjs",
     "audit:prod": "npm audit --omit=dev"
   }
 }

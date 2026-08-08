@@ -125,6 +125,19 @@ The model is instructed to:
 
 CUTS does not repair a model's composition or finish an incomplete edit on its behalf. Ahmed tells CUTS when a workspace is ready, and CUTS invokes Remotion to render it. A failed render remains visible as a failed submission.
 
+### Acquisition helpers
+
+CUTS provides two deliberately narrow local commands without choosing any material for the model:
+
+- A zero-dependency direct HTTPS media downloader built on Node's standard library
+- An optional wrapper around a manually supplied official `yt-dlp` standalone executable for supported platform page URLs
+
+Neither helper searches for material, makes creative choices, invokes an LLM, installs packages, or publishes anything. The model must decide what it wants, supply each source URL, and record that source in its submission manifest.
+
+### Iterative rendering
+
+Each generated task file includes a command that renders its workspace to `output/final.mp4` with the same Remotion pipeline as the CUTS web app. This lets a model inspect failures and iterate autonomously before Ahmed begins judging. The web app's Render button remains the final convenient handoff.
+
 ## 7. Remotion Contract
 
 Models may edit the supplied Remotion project freely. React code is the source of truth for the finished edit.
